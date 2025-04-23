@@ -6,6 +6,7 @@ from random import randint
 
 from selenium.webdriver.common.by import By
 from trendspy import Trends
+import requests
 
 from src.browser import Browser
 from src.utils import CONFIG, getProjectRoot, cooldown, COUNTRY
@@ -30,6 +31,23 @@ class Searches:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.googleTrendsShelf.__exit__(None, None, None)
 
+    def getRelatedTerms(self, term: str) -> list[str]:
+        """
+        Fetch related search terms dynamically from Bing's autocomplete API.
+        """
+        try:
+            response = requests.get(
+                f"https://api.bing.com/osjson.aspx?query={term}",
+                headers={"User-agent": self.browser.userAgent},
+            )
+            response.raise_for_status()
+            relatedTerms = response.json()[1]
+            uniqueTerms = list(dict.fromkeys(relatedTerms))
+            return [t for t in uniqueTerms if t.lower() != term.lower()]
+        except requests.RequestException as e:
+            logging.error(f"Error fetching related terms for {term}: {e}")
+            return []
+
     def bingSearches(self) -> None:
         # Function to perform Bing searches
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
@@ -53,7 +71,6 @@ class Searches:
                     self.googleTrendsShelf[trend.keyword] = trend
                 logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
 
-            # Search all available trends sequentially
             while self.googleTrendsShelf:
                 self.bingSearch()
                 sleep(randint(10, 15))
@@ -61,7 +78,7 @@ class Searches:
         logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
     def bingSearch(self) -> None:
-        # Function to perform a single Bing search (Primary + Additional)
+        # Function to perform a single Bing search (Primary + Related Additional Searches)
         pointsBefore = self.browser.utils.getAccountPoints()
 
         if not self.googleTrendsShelf:
@@ -69,16 +86,16 @@ class Searches:
             return
 
         trend = list(self.googleTrendsShelf.keys())[0]
-        trendKeywords = self.googleTrendsShelf[trend].trend_keywords
-        logging.debug(f"Primary trend={trend}")
-        logging.debug(f"Related trendKeywords={trendKeywords}")
+        primaryKeyword = trend
+        relatedKeywords = self.getRelatedTerms(primaryKeyword)  # Fetch dynamic related keywords
+
+        logging.debug(f"Primary trend={primaryKeyword}")
+        logging.debug(f"Fetched related keywords={relatedKeywords}")
 
         # Perform primary search
         self.browser.utils.goToSearch()
         searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
         searchbar.clear()
-        primaryKeyword = trend
-        logging.debug(f"Primary trendKeyword={primaryKeyword}")
         sleep(1)
         searchbar.send_keys(primaryKeyword)
         sleep(1)
@@ -91,9 +108,9 @@ class Searches:
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()  # Cooldown after primary search
 
-        # Perform additional searches using **related trendKeywords**
-        for i in range(min(self.num_additional_searches, len(trendKeywords))):
-            relatedKeyword = trendKeywords.pop(0)
+        # Perform additional searches using dynamically fetched related keywords
+        for i in range(min(self.num_additional_searches, len(relatedKeywords))):
+            relatedKeyword = relatedKeywords.pop(0)
             logging.debug(f"Related trendKeyword #{i+1}={relatedKeyword}")
 
             try:
@@ -111,4 +128,4 @@ class Searches:
             except Exception as e:
                 logging.error(f"Error searching {relatedKeyword}: {e}")
 
-        logging.info(f"[BING] Completed search cycle for trend: {trend}")
+        logging.info(f"[BING] Completed search cycle for trend: {primaryKeyword}")
