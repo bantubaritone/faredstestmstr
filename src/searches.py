@@ -73,7 +73,7 @@ class Searches:
 
         # Perform primary search
         self.browser.utils.goToSearch()
-        searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=40)
+        searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)  # Increased timeout
         searchbar.clear()
         trendKeyword = trendKeywords.pop(0)
         logging.debug(f"Primary trendKeyword={trendKeyword}")
@@ -89,18 +89,22 @@ class Searches:
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()  # Cooldown after primary search
 
-        # Perform additional searches based on customization
+        # Perform additional searches with improved handling
         for i in range(min(self.num_additional_searches, len(trendKeywords))):
             additionalKeyword = trendKeywords.pop(0)
             logging.debug(f"Additional trendKeyword #{i+1}={additionalKeyword}")
 
-            sleep(randint(2, 5))  # Short delay before additional search
-            searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=40)
-            searchbar.clear()
-            sleep(1)
-            searchbar.send_keys(additionalKeyword)
-            sleep(1)
-            searchbar.submit()
+            try:
+                self.browser.utils.goToSearch()  # Ensure page refresh before search
+                searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)  # Increased timeout
+                searchbar.clear()
+                sleep(1)
+                searchbar.send_keys(additionalKeyword)
+                sleep(1)
+                searchbar.submit()
 
-            logging.info(f"[COOLDOWN] Applying cooldown after additional search #{i+1}")
-            cooldown()  # Cooldown after every additional search
+                logging.info(f"[COOLDOWN] Applying cooldown after additional search #{i+1}")
+                cooldown()  # Cooldown after every additional search
+
+            except Exception as e:
+                logging.error(f"Error searching {additionalKeyword}: {e}")
