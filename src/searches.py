@@ -53,13 +53,15 @@ class Searches:
                     self.googleTrendsShelf[trend.keyword] = trend
                 logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
 
-            self.bingSearch()
-            sleep(randint(10, 15))
+            # Search all available trends sequentially
+            while self.googleTrendsShelf:
+                self.bingSearch()
+                sleep(randint(10, 15))
 
-        logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches !")
+        logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
     def bingSearch(self) -> None:
-        # Function to perform a single Bing search
+        # Function to perform a single Bing search (Primary + Additional)
         pointsBefore = self.browser.utils.getAccountPoints()
 
         if not self.googleTrendsShelf:
@@ -68,43 +70,45 @@ class Searches:
 
         trend = list(self.googleTrendsShelf.keys())[0]
         trendKeywords = self.googleTrendsShelf[trend].trend_keywords
-        logging.debug(f"trendKeywords={trendKeywords}")
-        logging.debug(f"trend={trend}")
+        logging.debug(f"Primary trend={trend}")
+        logging.debug(f"Related trendKeywords={trendKeywords}")
 
         # Perform primary search
         self.browser.utils.goToSearch()
-        searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)  # Increased timeout
+        searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
         searchbar.clear()
-        trendKeyword = trendKeywords.pop(0)
-        logging.debug(f"Primary trendKeyword={trendKeyword}")
+        primaryKeyword = trend
+        logging.debug(f"Primary trendKeyword={primaryKeyword}")
         sleep(1)
-        searchbar.send_keys(trendKeyword)
+        searchbar.send_keys(primaryKeyword)
         sleep(1)
         searchbar.submit()
-        
+
         pointsAfter = self.browser.utils.getAccountPoints()
         if pointsBefore < pointsAfter:
-            del self.googleTrendsShelf[trend]
+            del self.googleTrendsShelf[trend]  # Remove searched primary keyword
 
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()  # Cooldown after primary search
 
-        # Perform additional searches with improved handling
+        # Perform additional searches using **related trendKeywords**
         for i in range(min(self.num_additional_searches, len(trendKeywords))):
-            additionalKeyword = trendKeywords.pop(0)
-            logging.debug(f"Additional trendKeyword #{i+1}={additionalKeyword}")
+            relatedKeyword = trendKeywords.pop(0)
+            logging.debug(f"Related trendKeyword #{i+1}={relatedKeyword}")
 
             try:
-                self.browser.utils.goToSearch()  # Ensure page refresh before search
-                searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)  # Increased timeout
+                self.browser.utils.goToSearch()  # Refresh before searching
+                searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
                 searchbar.clear()
                 sleep(1)
-                searchbar.send_keys(additionalKeyword)
+                searchbar.send_keys(relatedKeyword)
                 sleep(1)
                 searchbar.submit()
 
-                logging.info(f"[COOLDOWN] Applying cooldown after additional search #{i+1}")
+                logging.info(f"[COOLDOWN] Applying cooldown after related search #{i+1}")
                 cooldown()  # Cooldown after every additional search
 
             except Exception as e:
-                logging.error(f"Error searching {additionalKeyword}: {e}")
+                logging.error(f"Error searching {relatedKeyword}: {e}")
+
+        logging.info(f"[BING] Completed search cycle for trend: {trend}")
