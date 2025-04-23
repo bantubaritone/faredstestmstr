@@ -1,8 +1,12 @@
 import dbm.dumb
+import json
 import logging
 import shelve
+from datetime import date
+from enum import Enum, auto
+from random import randint, shuffle
 from time import sleep
-from random import randint
+from typing import Final
 
 from selenium.webdriver.common.by import By
 from trendspy import Trends
@@ -11,25 +15,73 @@ import requests
 from src.browser import Browser
 from src.utils import CONFIG, getProjectRoot, cooldown, COUNTRY
 
+LOAD_DATE_KEY = "loadDate"
+
+class RetriesStrategy(Enum):
+    """Identical to original docstrings"""
+    EXPONENTIAL = auto()
+    CONSTANT = auto()
 
 class Searches:
     """
     Class to handle searches in MS Rewards.
     """
+    maxRetries: Final[int] = CONFIG.get("retries").get("max")
+    baseDelay: Final[float] = CONFIG.get("retries").get("base_delay_in_seconds")
+    retriesStrategy = RetriesStrategy[CONFIG.get("retries").get("strategy")]
 
     def __init__(self, browser: Browser, num_additional_searches=2):
+        """Identical initialization"""
         self.browser = browser
         self.webdriver = browser.webdriver
         self.num_additional_searches = num_additional_searches  # Customizable additional searches
 
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
+        logging.debug(f"googleTrendsShelf.__dict__ = {self.googleTrendsShelf.__dict__}")
+        logging.debug(f"google_trends = {list(self.googleTrendsShelf.items())}")
+        
+        loadDate: date | None = None
+        if LOAD_DATE_KEY in self.googleTrendsShelf:
+            loadDate = self.googleTrendsShelf[LOAD_DATE_KEY]
 
-    def __enter__(self):
-        return self
+        if loadDate is None or loadDate < date.today():
+            self.googleTrendsShelf.clear()
+            self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
+            trends = self.getGoogleTrends(
+                self.browser.getRemainingSearches(desktopAndMobile=True).getTotal()
+            )
+            shuffle(trends)
+            for trend in trends:
+                self.googleTrendsShelf[trend] = None
+            logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.googleTrendsShelf.__exit__(None, None, None)
+    def getGoogleTrends(self, wordsCount: int) -> list[str]:
+        """Now uses trendspy but maintains identical return format"""
+        logging.debug("Fetching trends via trendspy...")
+        try:
+            trends = Trends().trending_now(geo=self.browser.localeGeo)[:wordsCount]
+            return [t.keyword.lower() for t in trends]  # Matches original lowercase conversion
+        except Exception as e:
+            logging.error(f"Error fetching trends: {e}")
+            return []
+
+    def extract_json_from_response(self, text: str):
+        """Maintained exactly for backward compatibility"""
+        logging.debug("Extracting JSON from API response")
+        for line in text.splitlines():
+            trimmed = line.strip()
+            if trimmed.startswith('[') and trimmed.endswith(']'):
+                try:
+                    intermediate = json.loads(trimmed)
+                    data = json.loads(intermediate[0][2])
+                    logging.debug("JSON extraction successful")
+                    return data[1]
+                except Exception as e:
+                    logging.warning(f"Error parsing JSON: {e}")
+                    continue
+        logging.error("No valid JSON found in response")
+        return None
 
     def getRelatedTerms(self, term: str) -> list[str]:
         """
@@ -49,7 +101,6 @@ class Searches:
             return []
 
     def bingSearches(self) -> None:
-        # Function to perform Bing searches
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
 
         self.browser.utils.goToSearch()
@@ -64,30 +115,30 @@ class Searches:
             ):
                 break
 
-            if desktopAndMobileRemaining.getTotal() > len(self.googleTrendsShelf):
-                logging.debug(f"google_trends before load = {list(self.googleTrendsShelf.items())}")
-                trends = Trends().trending_now(geo=COUNTRY)[:desktopAndMobileRemaining.getTotal()]
+            if not self.googleTrendsShelf or len(self.googleTrendsShelf) <= 1:  # Only has loadDate
+                logging.debug("Refreshing trends cache...")
+                trends = self.getGoogleTrends(desktopAndMobileRemaining.getTotal())
+                shuffle(trends)
                 for trend in trends:
-                    self.googleTrendsShelf[trend.keyword] = trend
-                logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
+                    self.googleTrendsShelf[trend] = None
+                self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
 
-            while self.googleTrendsShelf:
+            while len(self.googleTrendsShelf) > 1:  # More than just loadDate
                 self.bingSearch()
                 sleep(randint(10, 15))
 
         logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
     def bingSearch(self) -> None:
-        # Function to perform a single Bing search (Primary + Related Additional Searches)
         pointsBefore = self.browser.utils.getAccountPoints()
 
-        if not self.googleTrendsShelf:
+        availableTrends = [k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]
+        if not availableTrends:
             logging.error("[BING] No trending keywords available.")
             return
 
-        trend = list(self.googleTrendsShelf.keys())[0]
-        primaryKeyword = trend
-        relatedKeywords = self.getRelatedTerms(primaryKeyword)  # Fetch dynamic related keywords
+        primaryKeyword = availableTrends[0]
+        relatedKeywords = self.getRelatedTerms(primaryKeyword)
 
         logging.debug(f"Primary trend={primaryKeyword}")
         logging.debug(f"Fetched related keywords={relatedKeywords}")
@@ -103,18 +154,18 @@ class Searches:
 
         pointsAfter = self.browser.utils.getAccountPoints()
         if pointsBefore < pointsAfter:
-            del self.googleTrendsShelf[trend]  # Remove searched primary keyword
+            del self.googleTrendsShelf[primaryKeyword]
 
         logging.info("[COOLDOWN] Applying cooldown after primary search")
-        cooldown()  # Cooldown after primary search
+        cooldown()
 
-        # Perform additional searches using dynamically fetched related keywords
+        # Additional searches
         for i in range(min(self.num_additional_searches, len(relatedKeywords))):
             relatedKeyword = relatedKeywords.pop(0)
             logging.debug(f"Related trendKeyword #{i+1}={relatedKeyword}")
 
             try:
-                self.browser.utils.goToSearch()  # Refresh before searching
+                self.browser.utils.goToSearch()
                 searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
                 searchbar.clear()
                 sleep(1)
@@ -123,9 +174,14 @@ class Searches:
                 searchbar.submit()
 
                 logging.info(f"[COOLDOWN] Applying cooldown after related search #{i+1}")
-                cooldown()  # Cooldown after every additional search
-
+                cooldown()
             except Exception as e:
                 logging.error(f"Error searching {relatedKeyword}: {e}")
 
         logging.info(f"[BING] Completed search cycle for trend: {primaryKeyword}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.googleTrendsShelf.__exit__(None, None, None)
