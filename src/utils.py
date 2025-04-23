@@ -314,17 +314,20 @@ class Utils:
     def getAccountPoints(self) -> int:
         if PREFER_BING_INFO:
             return self.getBingInfo()["userInfo"]["balance"]
-        return self.getDashboardData()["userStatus"]["availablePoints"]
+        else:
+            return self.getDashboardData()["userStatus"]["availablePoints"]
 
     def getGoalPoints(self) -> int:
         if PREFER_BING_INFO:
             return self.getBingInfo()["flyoutResult"]["userGoal"]["price"]
-        return self.getDashboardData()["userStatus"]["redeemGoal"]["price"]
+        else:
+            return self.getDashboardData()["userStatus"]["redeemGoal"]["price"]
 
     def getGoalTitle(self) -> str:
         if PREFER_BING_INFO:
             return self.getBingInfo()["flyoutResult"]["userGoal"]["title"]
-        return self.getDashboardData()["userStatus"]["redeemGoal"]["title"]
+        else:
+            return self.getDashboardData()["userStatus"]["redeemGoal"]["title"]
 
     def tryDismissAllMessages(self) -> None:
         byValues = [
