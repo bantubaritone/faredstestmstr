@@ -19,7 +19,7 @@ class Searches:
     def __init__(self, browser: Browser, num_additional_searches=2):
         self.browser = browser
         self.webdriver = browser.webdriver
-        self.num_additional_searches = num_additional_searches  # Added customization for additional searches
+        self.num_additional_searches = num_additional_searches  # Customizable additional searches
 
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
@@ -71,6 +71,7 @@ class Searches:
         logging.debug(f"trendKeywords={trendKeywords}")
         logging.debug(f"trend={trend}")
 
+        # Perform primary search
         self.browser.utils.goToSearch()
         searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=40)
         searchbar.clear()
@@ -80,15 +81,18 @@ class Searches:
         searchbar.send_keys(trendKeyword)
         sleep(1)
         searchbar.submit()
-
+        
         pointsAfter = self.browser.utils.getAccountPoints()
         if pointsBefore < pointsAfter:
             del self.googleTrendsShelf[trend]
 
+        logging.info("[COOLDOWN] Applying cooldown after primary search")
+        cooldown()  # Cooldown after primary search
+
         # Perform additional searches based on customization
         for i in range(min(self.num_additional_searches, len(trendKeywords))):
             additionalKeyword = trendKeywords.pop(0)
-            logging.debug(f"Additional trendKeyword #{i+1}={additionalKeyword}")  # Enhanced logging
+            logging.debug(f"Additional trendKeyword #{i+1}={additionalKeyword}")
 
             sleep(randint(2, 5))  # Short delay before additional search
             searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=40)
@@ -98,4 +102,5 @@ class Searches:
             sleep(1)
             searchbar.submit()
 
-        cooldown()
+            logging.info(f"[COOLDOWN] Applying cooldown after additional search #{i+1}")
+            cooldown()  # Cooldown after every additional search
