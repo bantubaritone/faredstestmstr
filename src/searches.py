@@ -31,10 +31,9 @@ class Searches:
     retriesStrategy = RetriesStrategy[CONFIG.get("retries").get("strategy")]
 
     def __init__(self, browser: Browser, num_additional_searches=2):
-        """Identical initialization"""
         self.browser = browser
         self.webdriver = browser.webdriver
-        self.num_additional_searches = num_additional_searches  # Customizable additional searches
+        self.num_additional_searches = num_additional_searches
 
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
@@ -57,17 +56,17 @@ class Searches:
             logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
 
     def getGoogleTrends(self, wordsCount: int) -> list[str]:
-        """Now uses trendspy but maintains identical return format"""
+        """Fetch trends using trendspy"""
         logging.debug("Fetching trends via trendspy...")
         try:
             trends = Trends().trending_now(geo=self.browser.localeGeo)[:wordsCount]
-            return [t.keyword.lower() for t in trends]  # Matches original lowercase conversion
+            return [t.keyword.lower() for t in trends]
         except Exception as e:
             logging.error(f"Error fetching trends: {e}")
             return []
 
     def extract_json_from_response(self, text: str):
-        """Maintained exactly for backward compatibility"""
+        """Maintained for backward compatibility"""
         logging.debug("Extracting JSON from API response")
         for line in text.splitlines():
             trimmed = line.strip()
@@ -84,9 +83,7 @@ class Searches:
         return None
 
     def getRelatedTerms(self, term: str) -> list[str]:
-        """
-        Fetch related search terms dynamically from Bing's autocomplete API.
-        """
+        """Fetch related terms from Bing's autocomplete API"""
         try:
             response = requests.get(
                 f"https://api.bing.com/osjson.aspx?query={term}",
@@ -102,17 +99,14 @@ class Searches:
 
     def bingSearches(self) -> None:
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
-
         self.browser.utils.goToSearch()
 
         while True:
             desktopAndMobileRemaining = self.browser.getRemainingSearches(desktopAndMobile=True)
             logging.info(f"[BING] Remaining searches={desktopAndMobileRemaining}")
 
-            if (
-                (self.browser.browserType == "desktop" and desktopAndMobileRemaining.desktop == 0) or
-                (self.browser.browserType == "mobile" and desktopAndMobileRemaining.mobile == 0)
-            ):
+            if ((self.browser.browserType == "desktop" and desktopAndMobileRemaining.desktop == 0) or
+                (self.browser.browserType == "mobile" and desktopAndMobileRemaining.mobile == 0)):
                 break
 
             if not self.googleTrendsShelf or len(self.googleTrendsShelf) <= 1:  # Only has loadDate
@@ -130,8 +124,6 @@ class Searches:
         logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
     def bingSearch(self) -> None:
-        pointsBefore = self.browser.utils.getAccountPoints()
-
         availableTrends = [k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]
         if not availableTrends:
             logging.error("[BING] No trending keywords available.")
@@ -152,9 +144,10 @@ class Searches:
         sleep(1)
         searchbar.submit()
 
-        pointsAfter = self.browser.utils.getAccountPoints()
-        if pointsBefore < pointsAfter:
+        # Always remove the keyword after searching
+        if primaryKeyword in self.googleTrendsShelf:
             del self.googleTrendsShelf[primaryKeyword]
+            logging.debug(f"Removed used keyword: {primaryKeyword}")
 
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()
