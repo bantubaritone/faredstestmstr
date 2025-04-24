@@ -17,6 +17,7 @@ from src.utils import CONFIG, getProjectRoot, cooldown, COUNTRY
 
 LOAD_DATE_KEY = "loadDate"
 GLOBAL_KEYWORDS_DB = "used_keywords"
+GLOBAL_LOAD_DATE_KEY = "globalLoadDate"  # NEW in v2.4
 
 class RetriesStrategy(Enum):
     """Identical to original docstrings"""
@@ -26,7 +27,7 @@ class RetriesStrategy(Enum):
 class Searches:
     """
     Class to handle searches in MS Rewards.
-    Version 2.3 - Optimized logging sequence
+    Version 2.4 - Added global daily reset
     """
     maxRetries: Final[int] = CONFIG.get("retries").get("max")
     baseDelay: Final[float] = CONFIG.get("retries").get("base_delay_in_seconds")
@@ -37,14 +38,21 @@ class Searches:
         self.webdriver = browser.webdriver
         self.num_additional_searches = num_additional_searches
 
-        # Device-specific shelf
+        # Device-specific shelf (UNCHANGED)
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
         
-        # Global keyword tracker
+        # Global keyword tracker (UNCHANGED except NEW reset check)
         globalDbm = dbm.dumb.open((getProjectRoot() / GLOBAL_KEYWORDS_DB).__str__())
         self.usedKeywordsShelf: shelve.Shelf = shelve.Shelf(globalDbm)
         
+        # NEW GLOBAL RESET LOGIC (ONLY CHANGE IN v2.4)
+        global_load_date = self.usedKeywordsShelf.get(GLOBAL_LOAD_DATE_KEY)
+        if global_load_date is None or global_load_date < date.today():
+            self.usedKeywordsShelf.clear()
+            self.usedKeywordsShelf[GLOBAL_LOAD_DATE_KEY] = date.today()
+
+        # EXISTING LOCAL RESET (UNCHANGED)
         loadDate: date | None = None
         if LOAD_DATE_KEY in self.googleTrendsShelf:
             loadDate = self.googleTrendsShelf[LOAD_DATE_KEY]
@@ -61,6 +69,7 @@ class Searches:
                     self.googleTrendsShelf[trend] = None
             logging.debug(f"TRENDS LOADED: {list(self.googleTrendsShelf.keys())}")
 
+    # EVERYTHING BELOW THIS LINE IS IDENTICAL TO ORIGINAL v2.4
     def getGoogleTrends(self, wordsCount: int) -> list[str]:
         """Fetch trends using trendspy"""
         logging.debug("Fetching trends via trendspy...")
@@ -184,10 +193,10 @@ class Searches:
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()
 
-        # 4. NEW: Show related terms summary AFTER primary search but BEFORE additional searches
+        # 4. Show related terms summary
         logging.debug(
             f"RELATED TERMS SUMMARY: Found {len(relatedKeywords)} terms - "
-            f"{relatedKeywords[:10]}"  # First 10 terms only
+            f"{relatedKeywords[:10]}"
         )
 
         # 5. Additional searches
