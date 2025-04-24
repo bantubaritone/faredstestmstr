@@ -16,6 +16,7 @@ from src.browser import Browser
 from src.utils import CONFIG, getProjectRoot, cooldown, COUNTRY
 
 LOAD_DATE_KEY = "loadDate"
+GLOBAL_KEYWORDS_DB = "used_keywords"
 
 class RetriesStrategy(Enum):
     """Identical to original docstrings"""
@@ -25,6 +26,7 @@ class RetriesStrategy(Enum):
 class Searches:
     """
     Class to handle searches in MS Rewards.
+    Version 2.1 - Cross-device unique searches with buffer tracking
     """
     maxRetries: Final[int] = CONFIG.get("retries").get("max")
     baseDelay: Final[float] = CONFIG.get("retries").get("base_delay_in_seconds")
@@ -35,10 +37,13 @@ class Searches:
         self.webdriver = browser.webdriver
         self.num_additional_searches = num_additional_searches
 
+        # Device-specific shelf
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
-        logging.debug(f"googleTrendsShelf.__dict__ = {self.googleTrendsShelf.__dict__}")
-        logging.debug(f"google_trends = {list(self.googleTrendsShelf.items())}")
+        
+        # Global keyword tracker
+        globalDbm = dbm.dumb.open((getProjectRoot() / GLOBAL_KEYWORDS_DB).__str__())
+        self.usedKeywordsShelf: shelve.Shelf = shelve.Shelf(globalDbm)
         
         loadDate: date | None = None
         if LOAD_DATE_KEY in self.googleTrendsShelf:
@@ -52,8 +57,9 @@ class Searches:
             )
             shuffle(trends)
             for trend in trends:
-                self.googleTrendsShelf[trend] = None
-            logging.debug(f"google_trends after load = {list(self.googleTrendsShelf.items())}")
+                if trend.lower() not in self.usedKeywordsShelf:
+                    self.googleTrendsShelf[trend] = None
+            logging.debug(f"TRENDS LOADED: {list(self.googleTrendsShelf.keys())}")
 
     def getGoogleTrends(self, wordsCount: int) -> list[str]:
         """Fetch trends using trendspy"""
@@ -98,42 +104,65 @@ class Searches:
             return []
 
     def bingSearches(self) -> None:
+        """Version 2.1 - Exact counting with cross-device deduplication"""
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
         self.browser.utils.goToSearch()
 
         while True:
-            desktopAndMobileRemaining = self.browser.getRemainingSearches(desktopAndMobile=True)
-            logging.info(f"[BING] Remaining searches={desktopAndMobileRemaining}")
-
-            if ((self.browser.browserType == "desktop" and desktopAndMobileRemaining.desktop == 0) or
-                (self.browser.browserType == "mobile" and desktopAndMobileRemaining.mobile == 0)):
+            remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
+            logging.info(f"[BING] Remaining searches={remaining}")
+            
+            if ((self.browser.browserType == "desktop" and remaining.desktop <= 0) or
+                (self.browser.browserType == "mobile" and remaining.mobile <= 0)):
                 break
-
-            if not self.googleTrendsShelf or len(self.googleTrendsShelf) <= 1:  # Only has loadDate
+                
+            needed_searches = remaining.desktop if self.browser.browserType == "desktop" else remaining.mobile
+            
+            if (len(self.googleTrendsShelf) <= 1 or
+                len([k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]) < needed_searches):
                 logging.debug("Refreshing trends cache...")
-                trends = self.getGoogleTrends(desktopAndMobileRemaining.getTotal())
+                trends = self.getGoogleTrends(needed_searches + 5)
                 shuffle(trends)
                 for trend in trends:
-                    self.googleTrendsShelf[trend] = None
+                    if trend.lower() not in self.usedKeywordsShelf:
+                        self.googleTrendsShelf[trend] = None
                 self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
+                
+                # BUFFER STATUS LOGGING (NEW)
+                logging.debug(
+                    f"BUFFER STATUS: Needed={needed_searches}, "
+                    f"Loaded={len(trends)}, "
+                    f"Now in shelf={len(self.googleTrendsShelf)-1}"
+                )
+                logging.debug(f"TRENDS LOADED: {list(self.googleTrendsShelf.keys())}")
 
-            while len(self.googleTrendsShelf) > 1:  # More than just loadDate
+            for _ in range(needed_searches):
+                if ((self.browser.browserType == "desktop" and remaining.desktop <= 0) or
+                    (self.browser.browserType == "mobile" and remaining.mobile <= 0)):
+                    break
+                    
                 self.bingSearch()
                 sleep(randint(10, 15))
+                
+                remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
+                logging.info(f"[BING] Updated remaining searches={remaining}")
 
         logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
     def bingSearch(self) -> None:
-        availableTrends = [k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]
+        availableTrends = [
+            k for k in self.googleTrendsShelf.keys() 
+            if k != LOAD_DATE_KEY and k.lower() not in self.usedKeywordsShelf
+        ]
         if not availableTrends:
-            logging.error("[BING] No trending keywords available.")
+            logging.error("[BING] No unused trending keywords available globally.")
             return
 
         primaryKeyword = availableTrends[0]
         relatedKeywords = self.getRelatedTerms(primaryKeyword)
 
-        logging.debug(f"Primary trend={primaryKeyword}")
-        logging.debug(f"Fetched related keywords={relatedKeywords}")
+        logging.debug(f"PRIMARY KEYWORD: {primaryKeyword}, REMAINING TRENDS: {len(self.googleTrendsShelf)-1}")
+        logging.debug(f"GLOBAL USAGE COUNT: {len(self.usedKeywordsShelf)}")
 
         # Perform primary search
         self.browser.utils.goToSearch()
@@ -144,10 +173,14 @@ class Searches:
         sleep(1)
         searchbar.submit()
 
-        # Always remove the keyword after searching
+        # Mark as used globally
+        self.usedKeywordsShelf[primaryKeyword.lower()] = None
+        logging.debug(f"MARKED AS USED GLOBALLY: {primaryKeyword}")
+
+        # Original local deletion
         if primaryKeyword in self.googleTrendsShelf:
             del self.googleTrendsShelf[primaryKeyword]
-            logging.debug(f"Removed used keyword: {primaryKeyword}")
+            logging.debug(f"POST-DELETION SHELF: {list(self.googleTrendsShelf.keys())}")
 
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()
@@ -177,4 +210,5 @@ class Searches:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.googleTrendsShelf.__exit__(None, None, None)
+        self.googleTrendsShelf.close()
+        self.usedKeywordsShelf.close()
