@@ -26,7 +26,7 @@ class RetriesStrategy(Enum):
 class Searches:
     """
     Class to handle searches in MS Rewards.
-    Version 2.1 - Cross-device unique searches with buffer tracking
+    Version 2.3 - Optimized logging sequence
     """
     maxRetries: Final[int] = CONFIG.get("retries").get("max")
     baseDelay: Final[float] = CONFIG.get("retries").get("base_delay_in_seconds")
@@ -104,7 +104,7 @@ class Searches:
             return []
 
     def bingSearches(self) -> None:
-        """Version 2.1 - Exact counting with cross-device deduplication"""
+        """Version 2.3 - Exact counting with cross-device deduplication"""
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
         self.browser.utils.goToSearch()
 
@@ -128,7 +128,6 @@ class Searches:
                         self.googleTrendsShelf[trend] = None
                 self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
                 
-                # BUFFER STATUS LOGGING (NEW)
                 logging.debug(
                     f"BUFFER STATUS: Needed={needed_searches}, "
                     f"Loaded={len(trends)}, "
@@ -164,7 +163,7 @@ class Searches:
         logging.debug(f"PRIMARY KEYWORD: {primaryKeyword}, REMAINING TRENDS: {len(self.googleTrendsShelf)-1}")
         logging.debug(f"GLOBAL USAGE COUNT: {len(self.usedKeywordsShelf)}")
 
-        # Perform primary search
+        # 1. Perform primary search first
         self.browser.utils.goToSearch()
         searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
         searchbar.clear()
@@ -173,11 +172,11 @@ class Searches:
         sleep(1)
         searchbar.submit()
 
-        # Mark as used globally
+        # 2. Mark as used globally
         self.usedKeywordsShelf[primaryKeyword.lower()] = None
         logging.debug(f"MARKED AS USED GLOBALLY: {primaryKeyword}")
 
-        # Original local deletion
+        # 3. Original local deletion
         if primaryKeyword in self.googleTrendsShelf:
             del self.googleTrendsShelf[primaryKeyword]
             logging.debug(f"POST-DELETION SHELF: {list(self.googleTrendsShelf.keys())}")
@@ -185,11 +184,16 @@ class Searches:
         logging.info("[COOLDOWN] Applying cooldown after primary search")
         cooldown()
 
-        # Additional searches
+        # 4. NEW: Show related terms summary AFTER primary search but BEFORE additional searches
+        logging.debug(
+            f"RELATED TERMS SUMMARY: Found {len(relatedKeywords)} terms - "
+            f"{relatedKeywords[:10]}"  # First 10 terms only
+        )
+
+        # 5. Additional searches
         for i in range(min(self.num_additional_searches, len(relatedKeywords))):
             relatedKeyword = relatedKeywords.pop(0)
-            logging.debug(f"Related trendKeyword #{i+1}={relatedKeyword}")
-
+            logging.debug(f"Searching related keyword #{i+1}: {relatedKeyword}")
             try:
                 self.browser.utils.goToSearch()
                 searchbar = self.browser.utils.waitUntilClickable(By.ID, "sb_form_q", timeToWait=60)
