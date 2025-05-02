@@ -7,14 +7,13 @@ from requests_oauthlib import OAuth2Session
 
 from src.browser import Browser
 from .activities import Activities
-from .utils import makeRequestsSession, cooldown
+from .utils import makeRequestsSession
 
 client_id = "0000000040170455"
 authorization_base_url = "https://login.live.com/oauth20_authorize.srf"
 token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 redirect_uri = "https://login.live.com/oauth20_desktop.srf"
 scope = ["service::prod.rewardsplatform.microsoft.com::MBI_SSL"]
-
 
 class ReadToEarn:
     """
@@ -106,8 +105,9 @@ class ReadToEarn:
                 logging.info("[READ TO EARN] Read All Available Articles!")
                 break
 
-            logging.info(f"[READ TO EARN] Read Article {i + 1}")
+            wait_time = random.randint(120, 180)
+            logging.info(f"[READ TO EARN] Read Article {i + 1}, waiting {wait_time} seconds before the next.")
             balance = newbalance
-            cooldown()
+            time.sleep(wait_time)
 
         logging.info("[READ TO EARN] Completed the Read to Earn successfully!")
