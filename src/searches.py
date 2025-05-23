@@ -118,7 +118,7 @@ class Searches:
         self.browser.utils.goToSearch()
 
         while True:
-            remaining = self.browser.getRemainingSearches(desktopAndMobile=False)
+            remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
             logging.info(f"[BING] Remaining searches={remaining}")
             
             if ((self.browser.browserType == "desktop" and remaining.desktop <= 0) or
