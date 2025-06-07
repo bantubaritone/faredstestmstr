@@ -33,10 +33,37 @@ class Searches:
     baseDelay: Final[float] = CONFIG.get("retries").get("base_delay_in_seconds")
     retriesStrategy = RetriesStrategy[CONFIG.get("retries").get("strategy")]
 
-    def __init__(self, browser: Browser, num_additional_searches=2):
+    def __init__(
+        self,
+        browser: Browser,
+        num_additional_searches=2,
+        custom_search_limits=None,
+        use_custom_limits=True  # NEW: Explicit switch
+    ):
+        """
+        :param custom_search_limits: Dict to force search counts (e.g., {"desktop": 10, "mobile": 5})
+        :param use_custom_limits: If True, uses custom_search_limits; otherwise auto-detects remaining searches.
+        """
+        if custom_search_limits is not None:
+            # 1. Dictionary check
+            if not isinstance(custom_search_limits, dict):
+                raise ValueError("custom_search_limits must be a dictionary")
+            # 2. Key existence check
+            if not all(k in custom_search_limits for k in ["desktop", "mobile"]):
+                raise ValueError("custom_search_limits must contain 'desktop' and 'mobile' keys")
+            # 3. Value type check (NEW)
+            if not all(isinstance(v, int) for v in custom_search_limits.values()):
+                raise ValueError("Search limits must be integers")
+            # 4. Positive integer validation
+            if not all(isinstance(v, int) and v >= 0 for v in custom_search_limits.values()):
+                raise ValueError("Search limits must be positive integers")
+            if any(v == 0 for v in custom_search_limits.values()):
+                logging.warning("Zero search limits will skip all searches for that device type")
         self.browser = browser
         self.webdriver = browser.webdriver
         self.num_additional_searches = num_additional_searches
+        self.custom_search_limits = custom_search_limits or {"desktop": 10, "mobile": 5}
+        self.use_custom_limits = use_custom_limits  # NEW: Switch
 
         # Device-specific shelf (UNCHANGED)
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
@@ -113,19 +140,40 @@ class Searches:
             return []
 
     def bingSearches(self) -> None:
-        """Version 2.3 - Exact counting with cross-device deduplication"""
+        """Version 2.4.2 - Custom/Auto search modes with fixed counter updates"""
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
         self.browser.utils.goToSearch()
 
         while True:
-            remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
-            logging.info(f"[BING] Remaining searches={remaining}")
-            
-            if ((self.browser.browserType == "desktop" and remaining.desktop <= 0) or
-                (self.browser.browserType == "mobile" and remaining.mobile <= 0)):
+            # --- SWITCH LOGIC ---
+            if self.use_custom_limits and self.custom_search_limits:
+                remaining_desktop = self.custom_search_limits.get("desktop", 0)
+                remaining_mobile = self.custom_search_limits.get("mobile", 0)
+                logging.info(f"[CUSTOM] Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
+            else:
+                remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
+                remaining_desktop, remaining_mobile = remaining.desktop, remaining.mobile
+            logging.info(f"[AUTO] Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
+
+            # Unified exit condition
+            current_remaining = remaining_desktop if self.browser.browserType == "desktop" else remaining_mobile
+            if current_remaining <= 0:
                 break
-                
-            needed_searches = remaining.desktop if self.browser.browserType == "desktop" else remaining.mobile
+
+            logging.info(f"[BING] Remaining searches: Desktop={remaining_desktop}, Mobile={remaining_mobile}")
+
+            # Calculate needed searches (FIXED: removed duplicate calculation)
+            if self.use_custom_limits and self.custom_search_limits:
+                needed_searches = (
+                    self.custom_search_limits["desktop"] 
+                    if self.browser.browserType == "desktop" 
+                    else self.custom_search_limits["mobile"]
+                )
+            else:
+                needed_searches = (
+                    remaining.desktop if self.browser.browserType == "desktop" 
+                    else remaining.mobile
+                )
             
             if (len(self.googleTrendsShelf) <= 1 or
                 len([k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]) < needed_searches):
@@ -136,24 +184,32 @@ class Searches:
                     if trend.lower() not in self.usedKeywordsShelf:
                         self.googleTrendsShelf[trend] = None
                 self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
-                
+            
                 logging.debug(
                     f"BUFFER STATUS: Needed={needed_searches}, "
                     f"Loaded={len(trends)}, "
                     f"Now in shelf={len(self.googleTrendsShelf)-1}"
                 )
-                logging.debug(f"TRENDS LOADED: {list(self.googleTrendsShelf.keys())}")
 
             for _ in range(needed_searches):
-                if ((self.browser.browserType == "desktop" and remaining.desktop <= 0) or
-                    (self.browser.browserType == "mobile" and remaining.mobile <= 0)):
+                current_remaining = remaining_desktop if self.browser.browserType == "desktop" else remaining_mobile
+                if current_remaining <= 0:
                     break
-                    
+                
                 self.bingSearch()
                 sleep(randint(10, 15))
-                
-                remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
-                logging.info(f"[BING] Updated remaining searches={remaining}")
+
+                # FIXED INDENTATION AND LOGIC:
+                if self.use_custom_limits and self.custom_search_limits:
+                    if self.browser.browserType == "desktop":
+                        self.custom_search_limits["desktop"] = max(0, self.custom_search_limits["desktop"] - 1)
+                        remaining_desktop = self.custom_search_limits["desktop"]
+                    else:
+                        self.custom_search_limits["mobile"] = max(0, self.custom_search_limits["mobile"] - 1)
+                        remaining_mobile = self.custom_search_limits["mobile"]
+                    logging.debug(f"[COUNTERS] Desktop: {remaining_desktop} | Mobile: {remaining_mobile}")
+                else:
+                    remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
 
         logging.info(f"[BING] Finished {self.browser.browserType.capitalize()} Edge Bing searches!")
 
