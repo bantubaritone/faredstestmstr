@@ -18,6 +18,7 @@ from src.utils import CONFIG, getProjectRoot, cooldown, COUNTRY
 LOAD_DATE_KEY = "loadDate"
 GLOBAL_KEYWORDS_DB = "used_keywords"
 GLOBAL_LOAD_DATE_KEY = "globalLoadDate"  # NEW in v2.4
+SEARCH_PROGRESS_KEY = "searchProgress"
 
 class RetriesStrategy(Enum):
     """Identical to original docstrings"""
@@ -38,7 +39,7 @@ class Searches:
         browser: Browser,
         num_additional_searches=2,
         custom_search_limits=None,
-        use_custom_limits=True  # NEW: Explicit switch
+        use_custom_limits=True
     ):
         """
         :param custom_search_limits: Dict to force search counts (e.g., {"desktop": 10, "mobile": 5})
@@ -62,24 +63,34 @@ class Searches:
         self.browser = browser
         self.webdriver = browser.webdriver
         self.num_additional_searches = num_additional_searches
-        self.custom_search_limits = custom_search_limits or {"desktop": 5, "mobile": 5}
-        self.use_custom_limits = use_custom_limits  # NEW: Switch
+        self.custom_search_limits = custom_search_limits or {"desktop": 10, "mobile": 5}
+        self.use_custom_limits = use_custom_limits
 
         # Device-specific shelf (UNCHANGED)
         dumbDbm = dbm.dumb.open((getProjectRoot() / "google_trends").__str__())
         self.googleTrendsShelf: shelve.Shelf = shelve.Shelf(dumbDbm)
-        
-        # Global keyword tracker (UNCHANGED except NEW reset check)
+    
+        # Global keyword tracker (UNCHANGED)
         globalDbm = dbm.dumb.open((getProjectRoot() / GLOBAL_KEYWORDS_DB).__str__())
         self.usedKeywordsShelf: shelve.Shelf = shelve.Shelf(globalDbm)
-        
-        # NEW GLOBAL RESET LOGIC (ONLY CHANGE IN v2.4)
+    
+        # NEW: Progress tracking initialization (only for custom mode)
+        if self.use_custom_limits and self.custom_search_limits is not None:
+            self.search_progress = self.usedKeywordsShelf.get("searchProgress", {"desktop": 0, "mobile": 0})
+        else:
+            self.search_progress = {"desktop": 0, "mobile": 0}  # Dummy object for auto mode
+    
+        # GLOBAL RESET LOGIC (Modified to preserve existing behavior)
         global_load_date = self.usedKeywordsShelf.get(GLOBAL_LOAD_DATE_KEY)
         if global_load_date is None or global_load_date < date.today():
             self.usedKeywordsShelf.clear()
             self.usedKeywordsShelf[GLOBAL_LOAD_DATE_KEY] = date.today()
+            # NEW: Reset progress only for custom mode
+            if self.use_custom_limits:
+                self.search_progress = {"desktop": 0, "mobile": 0}
+                self.usedKeywordsShelf["searchProgress"] = self.search_progress
 
-        # EXISTING LOCAL RESET (UNCHANGED)
+        # EXISTING LOCAL RESET (COMPLETELY UNCHANGED)
         loadDate: date | None = None
         if LOAD_DATE_KEY in self.googleTrendsShelf:
             loadDate = self.googleTrendsShelf[LOAD_DATE_KEY]
@@ -144,16 +155,29 @@ class Searches:
         logging.info(f"[BING] Starting {self.browser.browserType.capitalize()} Edge Bing searches...")
         self.browser.utils.goToSearch()
 
+        # NEW: Initialize progress tracking only for custom mode
+        if self.use_custom_limits and self.custom_search_limits:
+            self.search_progress = self.usedKeywordsShelf.get("searchProgress", {"desktop": 0, "mobile": 0})
+            # Adjust initial counts based on progress
+            self.custom_search_limits["desktop"] = max(0, self.custom_search_limits["desktop"] - self.search_progress["desktop"])
+            self.custom_search_limits["mobile"] = max(0, self.custom_search_limits["mobile"] - self.search_progress["mobile"])
+
         while True:
             # --- SWITCH LOGIC ---
             if self.use_custom_limits and self.custom_search_limits:
                 remaining_desktop = self.custom_search_limits.get("desktop", 0)
                 remaining_mobile = self.custom_search_limits.get("mobile", 0)
-                logging.info(f"[CUSTOM] Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
             else:
                 remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
                 remaining_desktop, remaining_mobile = remaining.desktop, remaining.mobile
-            logging.info(f"[AUTO] Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
+
+            # Unified logging format
+            mode = "CUSTOM" if (self.use_custom_limits and self.custom_search_limits) else "AUTO"
+            # NEW: Enhanced logging for custom mode
+            if self.use_custom_limits and self.custom_search_limits:
+                logging.info(f"[MODE:{mode}] Desktop: {remaining_desktop} (done: {self.search_progress['desktop']}), Mobile: {remaining_mobile} (done: {self.search_progress['mobile']})")
+            else:
+                logging.info(f"[MODE:{mode}] Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
 
             # Unified exit condition
             current_remaining = remaining_desktop if self.browser.browserType == "desktop" else remaining_mobile
@@ -174,7 +198,7 @@ class Searches:
                     remaining.desktop if self.browser.browserType == "desktop" 
                     else remaining.mobile
                 )
-            
+    
             if (len(self.googleTrendsShelf) <= 1 or
                 len([k for k in self.googleTrendsShelf.keys() if k != LOAD_DATE_KEY]) < needed_searches):
                 logging.debug("Refreshing trends cache...")
@@ -184,7 +208,7 @@ class Searches:
                     if trend.lower() not in self.usedKeywordsShelf:
                         self.googleTrendsShelf[trend] = None
                 self.googleTrendsShelf[LOAD_DATE_KEY] = date.today()
-            
+    
                 logging.debug(
                     f"BUFFER STATUS: Needed={needed_searches}, "
                     f"Loaded={len(trends)}, "
@@ -195,7 +219,7 @@ class Searches:
                 current_remaining = remaining_desktop if self.browser.browserType == "desktop" else remaining_mobile
                 if current_remaining <= 0:
                     break
-                
+        
                 self.bingSearch()
                 sleep(randint(10, 15))
 
@@ -204,10 +228,17 @@ class Searches:
                     if self.browser.browserType == "desktop":
                         self.custom_search_limits["desktop"] = max(0, self.custom_search_limits["desktop"] - 1)
                         remaining_desktop = self.custom_search_limits["desktop"]
+                        # NEW: Update progress tracking
+                        self.search_progress["desktop"] += 1
                     else:
                         self.custom_search_limits["mobile"] = max(0, self.custom_search_limits["mobile"] - 1)
                         remaining_mobile = self.custom_search_limits["mobile"]
-                    logging.debug(f"[COUNTERS] Desktop: {remaining_desktop} | Mobile: {remaining_mobile}")
+                        # NEW: Update progress tracking
+                        self.search_progress["mobile"] += 1
+                    # NEW: Save progress after each search
+                    self.usedKeywordsShelf["searchProgress"] = self.search_progress
+                    self.usedKeywordsShelf.sync()
+                    logging.debug(f"[MODE:{mode}] Counters - Desktop: {remaining_desktop}, Mobile: {remaining_mobile}")
                 else:
                     remaining = self.browser.getRemainingSearches(desktopAndMobile=True)
 
@@ -279,5 +310,14 @@ class Searches:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Ensure progress is saved when exiting"""
+        # NEW: Only save progress if in custom mode
+        if (hasattr(self, 'use_custom_limits') and 
+            self.use_custom_limits and 
+            hasattr(self, 'search_progress')):
+            self.usedKeywordsShelf["searchProgress"] = self.search_progress
+            self.usedKeywordsShelf.sync()  # Force immediate save
+    
+        # Original closing logic remains unchanged
         self.googleTrendsShelf.close()
         self.usedKeywordsShelf.close()
