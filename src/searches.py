@@ -39,7 +39,7 @@ class Searches:
         browser: Browser,
         num_additional_searches=2,
         custom_search_limits=None,
-        use_custom_limits=True
+        use_custom_limits=False
     ):
         """
         :param custom_search_limits: Dict to force search counts (e.g., {"desktop": 10, "mobile": 5})
