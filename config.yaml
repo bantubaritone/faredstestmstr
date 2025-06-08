@@ -17,7 +17,7 @@ browser:
   language: en # Replace with your language code https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes.
   # Detected by default, can be overridden with command-line arguments.
   visible: true # set it to true to show the browser window, can be overridden with command-line arguments.
-  proxy: http://tvkk:13579@00.0.000.00:3128 # set the global proxy using the 'http://user:pass@host:port' syntax.
+  proxy: http://tvkk:13579@3.108.53.226:3128 # set the global proxy using the 'http://user:pass@host:port' syntax.
   # Override per-account proxies. Can be overridden with command-line arguments.
 
 rtfr: false # If true, display the "read the readme" message at the start of the script and prevent the script
@@ -43,5 +43,5 @@ search:
 
 accounts: # The accounts to use. You can put zero, one or an infinite number of accounts here.
   # Empty by default, can be overridden with command-line arguments.
-  - email: aayushwaglen@outlook.com # replace with your email
-    password: vyGlddscxkA6 # replace with your password
+  - email: unnimangal@outlook.com # replace with your email
+    password: p5GKEZvByXzr # replace with your password
