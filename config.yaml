@@ -1,0 +1,47 @@
+apprise: # 'apprise' is the name of the service used for notifications https://github.com/caronc/apprise
+  enabled: true  # set it to false to disable apprise globally, can be overridden with command-line arguments.
+  notify:
+    incomplete-activity: true # set it to false to disable notifications for incomplete activities
+    uncaught-exception: true # set it to false to disable notifications for uncaught exceptions
+    login-code: true # set it to false to disable notifications for the temporary M$ Authenticator login code
+  summary: ALWAYS # set it to ALWAYS to always receive a summary about your points progression or errors, or to 
+  # NEVER to never receive a summary, even in case of an error. 
+  urls: # add apprise urls here to receive notifications on the specified services :
+    # https://github.com/caronc/apprise#supported-notifications
+    # Empty by default.
+    - discord://1249221380491186276/6d2llfGXypQ7hsCBzaiZq4rX7LirwK98X6vRrewv8_NyQ9ypujss4Tj0ysCgJVzXpSH1 # Exemple url 
+
+browser:
+  geolocation: IN # Replace with your country code https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2.
+  # Detected by default, can be overridden with command-line arguments.
+  language: en # Replace with your language code https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes.
+  # Detected by default, can be overridden with command-line arguments.
+  visible: true # set it to true to show the browser window, can be overridden with command-line arguments.
+  proxy: http://tvkk:13579@00.0.000.00:3128 # set the global proxy using the 'http://user:pass@host:port' syntax.
+  # Override per-account proxies. Can be overridden with command-line arguments.
+
+rtfr: false # If true, display the "read the readme" message at the start of the script and prevent the script
+# from running. Default is false.
+
+logging:
+  level: DEBUG # Set to DEBUG, WARNING, ERROR or CRITICAL to change the level of displayed information in the terminal
+  # See https://docs.python.org/3/library/logging.html#logging-levels. Can be overridden with command-line arguments.
+
+retries:
+  backoff-factor: 120 # The base wait time between each retries. Multiplied by two each try.
+  max: 3 # The maximal number of retries to do
+  strategy: CONSTANT # Set it to CONSTANT to use the same delay between each retries.
+  # Else, increase it exponentially each time.
+
+cooldown:
+  min: 220 # The minimal wait time between two searches/activities
+  max: 280 # The maximal wait time between two searches/activities
+
+search:
+  type: both # Set it to 'mobile' or 'desktop' to only complete searches on one plateform,
+  # can be overridden with command-line arguments.
+
+accounts: # The accounts to use. You can put zero, one or an infinite number of accounts here.
+  # Empty by default, can be overridden with command-line arguments.
+  - email: aayushwaglen@outlook.com # replace with your email
+    password: vyGlddscxkA6 # replace with your password
