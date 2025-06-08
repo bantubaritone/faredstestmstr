@@ -10,9 +10,11 @@ from logging import handlers
 from src import (
     Browser,
     Login,
+    MorePromotions,
     PunchCards,
     Searches,
     ReadToEarn,
+    DailySet,
 )
 from src.activities import Activities
 from src.browser import RemainingSearches
@@ -156,6 +158,8 @@ def executeBot(currentAccount):
                 f"[POINTS] You have {formatNumber(startingPoints)} points on your account"
             )
             #Activities(desktopBrowser).completeActivities()
+            DailySet(desktopBrowser).completeDailySet()
+            MorePromotions(desktopBrowser).completeMorePromotions()
             #PunchCards(desktopBrowser).completePunchCards()
             # VersusGame(desktopBrowser).completeVersusGame()
 
